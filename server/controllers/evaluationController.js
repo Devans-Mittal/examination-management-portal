@@ -13,14 +13,23 @@ export const getStudentsForEvaluation = async (req, res) => {
 
         const examinationIds = examinations.map((exam) => exam._id);
 
+        // Find only slots assigned to the currently logged-in examiner.
+        const examinerSlots = await ExamSlot.find({
+            examination: { $in: examinationIds },
+            examiner: req.user._id
+        }).select("_id");
+
+        const slotIds = examinerSlots.map((slot) => slot._id);
+
         const bookings = await Booking.find({
             examination: { $in: examinationIds },
+            slot: { $in: slotIds },
             status: "booked"
         })
             .populate("student", "fullName email department")
             .populate({
                 path: "slot",
-                select: "startTime endTime"
+                select: "startTime endTime examiner"
             })
             .populate("examination", "title examinationType status")
             .sort({ createdAt: 1 });
@@ -101,12 +110,26 @@ export const submitEvaluation = async (req, res) => {
             examination: exam._id,
             student,
             status: { $in: ["booked", "completed"] }
-        });
+        }).populate("slot", "examiner");
 
         if (!booking) {
             return res.status(400).json({
                 success: false,
                 message: "This student does not have an eligible booking for the examination."
+            });
+        }
+
+        if (!booking.slot) {
+            return res.status(400).json({
+                success: false,
+                message: "The booking does not have a valid examination slot."
+            });
+        }
+
+        if (booking.slot.examiner.toString() !== req.user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not authorized to evaluate this student's booking."
             });
         }
 

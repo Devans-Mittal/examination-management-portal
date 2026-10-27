@@ -207,3 +207,40 @@ export const deactivateCourse = async (req, res) => {
         });
     }
 };
+
+export const reactivateCourse = async (req, res) => {
+    try {
+        const course = await Course.findByIdAndUpdate(
+            req.params.id,
+            { $set: { isActive: true } },
+            { new: true, runValidators: true }
+        );
+
+        if (!course) {
+            return res.status(404).json({
+                success: false,
+                message: "Course not found.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Course reactivated successfully.",
+            course,
+        });
+    } catch (error) {
+        if (error.name === "CastError") {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid course ID.",
+            });
+        }
+
+        console.error("Reactivate course error:", error.message);
+
+        return res.status(500).json({
+            success: false,
+            message: "Unable to reactivate course.",
+        });
+    }
+};

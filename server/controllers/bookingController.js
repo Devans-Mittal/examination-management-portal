@@ -60,135 +60,169 @@ export const getAvailableExaminations = async (req, res) => {
 
 // Book an available slot
 export const createBooking = async (req, res) => {
+    const { slot: slotId } = req.body;
+
+    if (!slotId || !mongoose.Types.ObjectId.isValid(slotId)) {
+        return res.status(400).json({
+            success: false,
+            message: "A valid slot ID is required."
+        });
+    }
+
+    const session = await mongoose.startSession();
+    let createdBooking;
+
     try {
-        const { slot: slotId } = req.body;
+        await session.withTransaction(async () => {
+            const now = new Date();
 
-        if (!slotId || !mongoose.isValidObjectId(slotId)) {
-            return res.status(400).json({
-                success: false,
-                message: "A valid slot ID is required."
-            });
-        }
+            // 1. Find the requested active slot.
+            const slot = await ExamSlot.findOne({
+                _id: slotId,
+                isActive: true
+            }).session(session);
 
-        const slot = await ExamSlot.findOne({
-            _id: slotId,
-            isActive: true
+            if (!slot) {
+                const error = new Error("Slot not found or inactive.");
+                error.statusCode = 404;
+                throw error;
+            }
+
+            // 2. Validate the examination and booking window.
+            const examination = await Examination.findById(
+                slot.examination
+            ).session(session);
+
+            if (
+                !examination ||
+                examination.status !== "published" ||
+                now < examination.bookingStart ||
+                now >= examination.bookingEnd
+            ) {
+                const error = new Error(
+                    "This examination is not currently available for booking."
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            if (slot.startTime <= now) {
+                const error = new Error(
+                    "This examination slot has already started or passed."
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            // 3. Prevent duplicate bookings for the same slot.
+            const existingSlotBooking = await Booking.findOne({
+                student: req.user._id,
+                slot: slot._id
+            }).session(session);
+
+            if (existingSlotBooking) {
+                const error = new Error(
+                    "You have already booked this slot. Cancelled bookings cannot be reused."
+                );
+                error.statusCode = 409;
+                throw error;
+            }
+
+            // 4. Prevent multiple active bookings for the same examination.
+            const existingExamBooking = await Booking.findOne({
+                student: req.user._id,
+                examination: examination._id,
+                status: "booked"
+            }).session(session);
+
+            if (existingExamBooking) {
+                const error = new Error(
+                    "You already have a booking for this examination."
+                );
+                error.statusCode = 409;
+                throw error;
+            }
+
+            // 5. Atomically claim a seat, but only if capacity remains.
+            const claimedSlot = await ExamSlot.findOneAndUpdate(
+                {
+                    _id: slot._id,
+                    isActive: true,
+                    bookedStudents: { $ne: req.user._id },
+                    $expr: {
+                        $lt: [
+                            {
+                                $size: {
+                                    $ifNull: ["$bookedStudents", []]
+                                }
+                            },
+                            "$capacity"
+                        ]
+                    }
+                },
+                {
+                    $addToSet: {
+                        bookedStudents: req.user._id
+                    }
+                },
+                {
+                    new: true,
+                    session
+                }
+            );
+
+            if (!claimedSlot) {
+                const error = new Error(
+                    "This slot is full or you have already reserved it."
+                );
+                error.statusCode = 409;
+                throw error;
+            }
+
+            // 6. Create the booking in the same transaction.
+            const bookings = await Booking.create(
+                [
+                    {
+                        student: req.user._id,
+                        slot: slot._id,
+                        examination: examination._id,
+                        status: "booked"
+                    }
+                ],
+                { session }
+            );
+
+            createdBooking = bookings[0];
         });
 
-        if (!slot) {
-            return res.status(404).json({
-                success: false,
-                message: "Available slot not found."
-            });
-        }
-
-        const exam = await Examination.findOne({
-            _id: slot.examination,
-            status: "published",
-            bookingStart: { $lte: new Date() },
-            bookingEnd: { $gt: new Date() }
+        return res.status(201).json({
+            success: true,
+            message: "Examination slot booked successfully.",
+            data: createdBooking
         });
 
-        if (!exam) {
-            return res.status(400).json({
-                success: false,
-                message: "Booking is not currently open for this examination."
-            });
-        }
+    } catch (error) {
+        console.error("Create booking:", error.message);
 
-        if (slot.startTime <= new Date()) {
-            return res.status(400).json({
-                success: false,
-                message: "This slot has already started."
-            });
-        }
-
-        const existingBooking = await Booking.findOne({
-            student: req.user._id,
-            slot: slot._id,
-            status: "booked"
-        });
-
-        if (existingBooking) {
+        if (error.code === 11000) {
             return res.status(409).json({
                 success: false,
                 message: "You have already booked this slot."
             });
         }
 
-        // A student can only have one active booking per examination.
-        const existingExamBooking = await Booking.findOne({
-            student: req.user._id,
-            examination: exam._id,
-            status: "booked"
-        });
-
-        if (existingExamBooking) {
-            return res.status(409).json({
-                success: false,
-                message: "You already have a booking for this examination."
-            });
-        }
-
-        // Atomically claim a seat so concurrent requests cannot exceed capacity.
-        const claimedSlot = await ExamSlot.findOneAndUpdate(
-            {
-                _id: slot._id,
-                isActive: true,
-                $expr: {
-                    $lt: [
-                        {
-                            $size: {
-                                $ifNull: ["$bookedStudents", []]
-                            }
-                        },
-                        "$capacity"
-                    ]
-                }
-            },
-            {
-                $addToSet: { bookedStudents: req.user._id }
-            },
-            { new: true }
-        );
-
-        // Older slot documents may not have a bookedStudents array.
-        // If no seat was claimed, report that the slot is full.
-        if (!claimedSlot) {
-            return res.status(409).json({
-                success: false,
-                message: "This slot is full or no longer available."
-            });
-        }
-
-        const booking = await Booking.create({
-            student: req.user._id,
-            slot: slot._id,
-            examination: exam._id,
-            status: "booked"
-        });
-
-        return res.status(201).json({
-            success: true,
-            message: "Examination slot booked successfully.",
-            data: booking
-        });
-    } catch (error) {
-        if (error.code === 11000) {
-            return res.status(409).json({
-                success: false,
-                message: "A duplicate booking is not allowed."
-            });
-        }
-
-        console.error("Create booking error:", error.message);
-        return res.status(500).json({
+        return res.status(error.statusCode || 500).json({
             success: false,
-            message: "Failed to create booking."
+            message:
+                error.statusCode
+                    ? error.message
+                    : "Unable to create booking."
         });
+
+    } finally {
+        await session.endSession();
     }
 };
-
 // View the logged-in student's bookings
 export const getMyBookings = async (req, res) => {
     try {
@@ -225,57 +259,94 @@ export const getMyBookings = async (req, res) => {
 
 // Cancel a booking
 export const cancelBooking = async (req, res) => {
-    try {
-        const { id } = req.params;
+    const { id } = req.params;
 
-        if (!mongoose.isValidObjectId(id)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid booking ID."
-            });
-        }
-
-        const booking = await Booking.findOne({
-            _id: id,
-            student: req.user._id,
-            status: "booked"
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({
+            success: false,
+            message: "Invalid booking ID."
         });
+    }
 
-        if (!booking) {
-            return res.status(404).json({
-                success: false,
-                message: "Active booking not found."
-            });
-        }
+    const session = await mongoose.startSession();
+    let cancelledBooking;
 
-        const slot = await ExamSlot.findById(booking.slot);
+    try {
+        await session.withTransaction(async () => {
+            // 1. Find a booking belonging to the logged-in student.
+            const booking = await Booking.findOne({
+                _id: id,
+                student: req.user._id,
+                status: "booked"
+            }).session(session);
 
-        if (!slot || slot.startTime <= new Date()) {
-            return res.status(400).json({
-                success: false,
-                message: "This booking can no longer be cancelled."
-            });
-        }
+            if (!booking) {
+                const error = new Error(
+                    "Active booking not found."
+                );
+                error.statusCode = 404;
+                throw error;
+            }
 
-        booking.status = "cancelled";
-        booking.cancelledAt = new Date();
-        await booking.save();
+            // 2. Confirm the slot exists and has not started.
+            const slot = await ExamSlot.findById(
+                booking.slot
+            ).session(session);
 
-        await ExamSlot.updateOne(
-            { _id: slot._id },
-            { $pull: { bookedStudents: req.user._id } }
-        );
+            if (!slot) {
+                const error = new Error(
+                    "The examination slot could not be found."
+                );
+                error.statusCode = 404;
+                throw error;
+            }
+
+            if (slot.startTime <= new Date()) {
+                const error = new Error(
+                    "This booking can no longer be cancelled because the slot has started or passed."
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+
+            // 3. Mark the booking as cancelled.
+            booking.status = "cancelled";
+            booking.cancelledAt = new Date();
+
+            await booking.save({ session });
+
+            // 4. Release the reserved seat in the same transaction.
+            await ExamSlot.updateOne(
+                { _id: slot._id },
+                {
+                    $pull: {
+                        bookedStudents: req.user._id
+                    }
+                },
+                { session }
+            );
+
+            cancelledBooking = booking;
+        });
 
         return res.status(200).json({
             success: true,
             message: "Booking cancelled successfully.",
-            data: booking
+            data: cancelledBooking
         });
+
     } catch (error) {
-        console.error("Cancel booking error:", error.message);
-        return res.status(500).json({
+        console.error("Cancel booking:", error.message);
+
+        return res.status(error.statusCode || 500).json({
             success: false,
-            message: "Failed to cancel booking."
+            message:
+                error.statusCode
+                    ? error.message
+                    : "Unable to cancel booking."
         });
+
+    } finally {
+        await session.endSession();
     }
 };

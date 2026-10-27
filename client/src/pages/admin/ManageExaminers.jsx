@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import ConfirmDialog from "../../components/ConfirmDialog";
 import {
     Users,
     Mail,
@@ -55,6 +56,9 @@ export default function ManageExaminers() {
     const [error, setError] = useState("");
     const [success, setSuccess] = useState("");
     const [search, setSearch] = useState("");
+    const [confirmationOpen, setConfirmationOpen] = useState(false);
+    const [selectedExaminer, setSelectedExaminer] = useState(null);
+    const [rejecting, setRejecting] = useState(false);
 
     const loadExaminers = useCallback(async (tab = activeTab) => {
         setLoading(true);
@@ -108,16 +112,15 @@ export default function ManageExaminers() {
         setActiveTab(tab);
     };
 
+    const requestReject = (examiner) => {
+        setError("");
+        setSuccess("");
+        setSelectedExaminer(examiner);
+        setConfirmationOpen(true);
+    };
+
     const handleAction = async (examiner, action) => {
         const isApprove = action === "approve";
-
-        if (!isApprove) {
-            const confirmed = window.confirm(
-                `Reject the examiner registration for ${examiner.fullName}?\n\nThey will not be able to sign in as an examiner.`
-            );
-
-            if (!confirmed) return;
-        }
 
         setError("");
         setSuccess("");
@@ -169,13 +172,24 @@ export default function ManageExaminers() {
                     response.data.message ||
                     "Examiner registration rejected."
                 );
+
+                setConfirmationOpen(false);
+                setSelectedExaminer(null);
             }
         } catch (err) {
             setError(getErrorMessage(err));
         } finally {
             setActionId(null);
             setProcessingAction(null);
+            setRejecting(false);
         }
+    };
+
+    const confirmReject = async () => {
+        if (!selectedExaminer || rejecting) return;
+
+        setRejecting(true);
+        await handleAction(selectedExaminer, "reject");
     };
 
     const examiners =
@@ -454,9 +468,8 @@ export default function ManageExaminers() {
                                                         type="button"
                                                         className="examiners-approve-button"
                                                         onClick={() =>
-                                                            handleAction(
-                                                                examiner,
-                                                                "approve"
+                                                            requestReject(
+                                                                examiner
                                                             )
                                                         }
                                                         disabled={actionId !== null}
@@ -514,6 +527,22 @@ export default function ManageExaminers() {
                     </footer>
                 )}
             </div>
+            <ConfirmDialog
+                open={confirmationOpen}
+                title="Reject examiner registration?"
+                message={`Are you sure you want to reject the examiner registration for "${selectedExaminer?.fullName || "this examiner"}"? They will not be able to sign in as an examiner.`}
+                confirmText="Reject Examiner"
+                cancelText="Keep Application"
+                danger
+                loading={rejecting}
+                onConfirm={confirmReject}
+                onCancel={() => {
+                    if (rejecting) return;
+
+                    setConfirmationOpen(false);
+                    setSelectedExaminer(null);
+                }}
+            />
         </section>
     );
 }

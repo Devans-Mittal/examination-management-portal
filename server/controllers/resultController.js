@@ -55,6 +55,13 @@ export const publishResult = async (req, res) => {
             });
         }
 
+        if (evaluation.status !== "submitted") {
+            return res.status(400).json({
+                success: false,
+                message: "Only submitted evaluations can be published."
+            });
+        }
+
         evaluation.status = "published";
         evaluation.publishedAt = new Date();
 

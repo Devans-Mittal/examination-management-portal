@@ -25,6 +25,8 @@ export default function ExaminerDashboard() {
         let active = true;
 
         async function loadDashboard() {
+            setLoading(true);
+            setError("");
             const requests = await Promise.allSettled([
                 api.get("/slots/assigned-examinations"),
                 api.get("/slots/my-slots"),

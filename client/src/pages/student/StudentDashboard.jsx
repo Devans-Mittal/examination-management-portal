@@ -26,6 +26,8 @@ export default function StudentDashboard() {
         let active = true;
 
         async function loadDashboard() {
+            setLoading(true);
+            setError("");
             const requests = await Promise.allSettled([
                 api.get("/bookings/available-examinations"),
                 api.get("/bookings/my-bookings"),

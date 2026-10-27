@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import ConfirmDialog from "../../components/ConfirmDialog";
 import {
     BookOpen,
     Plus,
@@ -41,6 +42,14 @@ export default function ManageCourses() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingCourse, setEditingCourse] = useState(null);
     const [form, setForm] = useState(initialForm);
+
+    const [confirmationOpen, setConfirmationOpen] = useState(false);
+    const [selectedCourse, setSelectedCourse] = useState(null);
+    const [deactivating, setDeactivating] = useState(false);
+
+    const [reactivationOpen, setReactivationOpen] = useState(false);
+    const [selectedReactivationCourse, setSelectedReactivationCourse] = useState(null);
+    const [reactivating, setReactivating] = useState(false);
 
     const loadCourses = async () => {
         setLoading(true);
@@ -215,13 +224,19 @@ export default function ManageCourses() {
         }
     };
 
-    const handleDeactivate = async (course) => {
-        const confirmed = window.confirm(
-            `Deactivate ${course.courseCode} — ${course.title}?\n\nThe course will remain in the database but will be marked inactive.`
-        );
+    const requestDeactivate = (course) => {
+        setError("");
+        setSuccess("");
+        setSelectedCourse(course);
+        setConfirmationOpen(true);
+    };
 
-        if (!confirmed) return;
+    const handleDeactivate = async () => {
+        if (!selectedCourse) return;
 
+        const course = selectedCourse;
+
+        setDeactivating(true);
         setError("");
         setSuccess("");
 
@@ -243,8 +258,57 @@ export default function ManageCourses() {
             );
 
             setSuccess(`${course.courseCode} has been deactivated.`);
+            setConfirmationOpen(false);
+            setSelectedCourse(null);
         } catch (err) {
             setError(getErrorMessage(err));
+        } finally {
+            setDeactivating(false);
+        }
+    };
+
+    const requestReactivate = (course) => {
+        setError("");
+        setSuccess("");
+        setSelectedReactivationCourse(course);
+        setReactivationOpen(true);
+    };
+
+    const handleReactivate = async () => {
+        if (!selectedReactivationCourse) return;
+
+        const course = selectedReactivationCourse;
+
+        setReactivating(true);
+        setError("");
+        setSuccess("");
+
+        try {
+            const response = await api.patch(
+                `/courses/${course._id}/reactivate`
+            );
+
+            const updatedCourse = response.data?.course;
+
+            if (!updatedCourse) {
+                throw new Error(
+                    "The server did not return the updated course."
+                );
+            }
+
+            setCourses((previous) =>
+                previous.map((item) =>
+                    item._id === updatedCourse._id ? updatedCourse : item
+                )
+            );
+
+            setSuccess(`${course.courseCode} has been reactivated.`);
+            setReactivationOpen(false);
+            setSelectedReactivationCourse(null);
+        } catch (err) {
+            setError(getErrorMessage(err));
+        } finally {
+            setReactivating(false);
         }
     };
 
@@ -430,8 +494,8 @@ export default function ManageCourses() {
                                             <td>
                                                 <span
                                                     className={`courses-status ${course.isActive
-                                                            ? "courses-status-active"
-                                                            : "courses-status-inactive"
+                                                        ? "courses-status-active"
+                                                        : "courses-status-inactive"
                                                         }`}
                                                 >
                                                     {course.isActive ? "Active" : "Inactive"}
@@ -450,15 +514,25 @@ export default function ManageCourses() {
                                                         <Pencil size={16} />
                                                     </button>
 
-                                                    {course.isActive && (
+                                                    {course.isActive ? (
                                                         <button
                                                             type="button"
                                                             className="courses-action-button courses-deactivate-button"
                                                             title="Deactivate course"
                                                             aria-label={`Deactivate ${course.courseCode}`}
-                                                            onClick={() => handleDeactivate(course)}
+                                                            onClick={() => requestDeactivate(course)}
                                                         >
                                                             <Power size={16} />
+                                                        </button>
+                                                    ) : (
+                                                        <button
+                                                            type="button"
+                                                            className="courses-action-button courses-reactivate-button"
+                                                            title="Reactivate course"
+                                                            aria-label={`Reactivate ${course.courseCode}`}
+                                                            onClick={() => requestReactivate(course)}
+                                                        >
+                                                            <RefreshCw size={16} />
                                                         </button>
                                                     )}
                                                 </div>
@@ -640,6 +714,41 @@ export default function ManageCourses() {
                     </section>
                 </div>
             )}
+            <ConfirmDialog
+                open={confirmationOpen}
+                title="Deactivate this course?"
+                message={
+                    `Are you sure you want to deactivate "${selectedCourse?.courseCode || ""} — ${selectedCourse?.title || ""}"? The course will remain in the database but will be marked inactive.`
+                }
+                confirmText="Deactivate Course"
+                cancelText="Keep Course Active"
+                danger
+                loading={deactivating}
+                onConfirm={handleDeactivate}
+                onCancel={() => {
+                    if (deactivating) return;
+
+                    setConfirmationOpen(false);
+                    setSelectedCourse(null);
+                }}
+            />
+            <ConfirmDialog
+                open={reactivationOpen}
+                title="Reactivate this course?"
+                message={`Are you sure you want to reactivate "${selectedReactivationCourse?.courseCode || ""
+                    } — ${selectedReactivationCourse?.title || ""
+                    }"? The course will be marked active again.`}
+                confirmText="Reactivate Course"
+                cancelText="Keep Course Inactive"
+                loading={reactivating}
+                onConfirm={handleReactivate}
+                onCancel={() => {
+                    if (reactivating) return;
+
+                    setReactivationOpen(false);
+                    setSelectedReactivationCourse(null);
+                }}
+            />
         </section>
     );
 }

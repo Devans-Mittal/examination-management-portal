@@ -10,6 +10,11 @@ import StudentDashboard from "./pages/student/StudentDashboard";
 import ManageExaminers from "./pages/admin/ManageExaminers";
 import ManageExaminations from "./pages/admin/ManageExaminations";
 import ManageSlots from "./pages/examiner/ManageSlots";
+import EvaluateStudents from "./pages/examiner/EvaluateStudents";
+import StudentExaminations from "./pages/student/StudentExaminations";
+import MyBookings from "./pages/student/MyBookings";
+import StudentResults from "./pages/student/StudentResults";
+import ManageResults from "./pages/admin/ManageResults";
 function Unauthorized() {
   return (
     <main className="simple-page">
@@ -52,7 +57,7 @@ export default function App() {
           />
           <Route
             path="/admin/results"
-            element={<ComingSoon title="Manage Results" />}
+            element={<ManageResults/>}
           />
         </Route>
       </Route>
@@ -64,7 +69,7 @@ export default function App() {
           <Route path="/examiner/slots" element={<ManageSlots />} />
           <Route
             path="/examiner/evaluate"
-            element={<ComingSoon title="Evaluate Students" />}
+            element={ <EvaluateStudents/>}
           />
         </Route>
       </Route>
@@ -75,15 +80,15 @@ export default function App() {
           <Route path="/student" element={<StudentDashboard />} />
           <Route
             path="/student/examinations"
-            element={<ComingSoon title="Available Examinations" />}
+            element={<StudentExaminations />}
           />
           <Route
             path="/student/bookings"
-            element={<ComingSoon title="My Bookings" />}
+            element={<MyBookings/>}
           />
           <Route
             path="/student/results"
-            element={<ComingSoon title="My Results" />}
+            element={<StudentResults/>}
           />
         </Route>
       </Route>

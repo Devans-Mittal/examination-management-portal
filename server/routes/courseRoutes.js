@@ -5,6 +5,7 @@ import {
     getCourses,
     updateCourse,
     deactivateCourse,
+    reactivateCourse,
 } from "../controllers/courseController.js";
 
 import {
@@ -23,5 +24,7 @@ router.route("/")
 router.patch("/:id", updateCourse);
 
 router.patch("/:id/deactivate", deactivateCourse);
+
+router.patch("/:id/reactivate", reactivateCourse);
 
 export default router;

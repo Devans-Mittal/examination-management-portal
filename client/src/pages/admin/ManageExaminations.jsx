@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import ConfirmDialog from "../../components/ConfirmDialog";
 import {
     CalendarDays,
     Clock,
@@ -11,6 +12,7 @@ import {
     Pencil,
     Send,
     Ban,
+    CheckCircle,
 } from "lucide-react";
 import api from "../../services/api";
 
@@ -74,6 +76,11 @@ export default function ManageExaminations() {
     const [showForm, setShowForm] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [form, setForm] = useState(emptyForm);
+    const [confirmation, setConfirmation] = useState({
+        open: false,
+        exam: null,
+        action: "",
+    });
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -233,13 +240,21 @@ export default function ManageExaminations() {
         }
     };
 
-    const performAction = async (exam, action) => {
-        const messages = {
-            publish: `Publish "${exam.title}"? Students will be able to book it according to the booking schedule.`,
-            cancel: `Cancel "${exam.title}"? This action cannot be undone through this page.`,
-        };
+    const requestAction = (exam, action) => {
+        setError("");
+        setNotice("");
 
-        if (!window.confirm(messages[action])) return;
+        setConfirmation({
+            open: true,
+            exam,
+            action,
+        });
+    };
+
+    const performAction = async () => {
+        const { exam, action } = confirmation;
+
+        if (!exam || !action) return;
 
         setError("");
         setNotice("");
@@ -251,13 +266,27 @@ export default function ManageExaminations() {
 
             setNotice(
                 response.data.message ||
-                `Examination ${action === "publish" ? "published" : "cancelled"} successfully.`
+                `Examination ${action === "publish"
+                    ? "published"
+                    : action === "cancel"
+                        ? "cancelled"
+                        : "marked as completed"
+                } successfully.`
             );
+
+            setConfirmation({
+                open: false,
+                exam: null,
+                action: "",
+            });
 
             await loadData();
         } catch (err) {
             setError(
-                getErrorMessage(err, `Unable to ${action} the examination.`)
+                getErrorMessage(
+                    err,
+                    `Unable to ${action} the examination.`
+                )
             );
         }
     };
@@ -695,7 +724,7 @@ export default function ManageExaminations() {
                                                         <button
                                                             type="button"
                                                             className="exam-action-btn exam-action-publish"
-                                                            onClick={() => performAction(exam, "publish")}
+                                                            onClick={() => requestAction(exam, "publish")}
                                                             title="Publish examination"
                                                         >
                                                             <Send size={15} />
@@ -707,11 +736,23 @@ export default function ManageExaminations() {
                                                         <button
                                                             type="button"
                                                             className="exam-action-btn exam-action-cancel"
-                                                            onClick={() => performAction(exam, "cancel")}
+                                                            onClick={() => requestAction(exam, "cancel")}
                                                             title="Cancel examination"
                                                         >
                                                             <Ban size={15} />
                                                             Cancel
+                                                        </button>
+                                                    )}
+
+                                                    {exam.status === "published" && (
+                                                        <button
+                                                            type="button"
+                                                            className="exam-action-btn exam-action-complete"
+                                                            onClick={() => requestAction(exam, "complete")}
+                                                            title="Mark examination as completed"
+                                                        >
+                                                            <CheckCircle size={15} />
+                                                            Mark Completed
                                                         </button>
                                                     )}
                                                 </div>
@@ -724,6 +765,39 @@ export default function ManageExaminations() {
                     </div>
                 )}
             </section>
+            <ConfirmDialog
+                open={confirmation.open}
+                title={
+                    confirmation.action === "publish"
+                        ? "Publish examination?"
+                        : confirmation.action === "cancel"
+                            ? "Cancel examination?"
+                            : "Complete examination?"
+                }
+                message={
+                    confirmation.action === "publish"
+                        ? `Publish "${confirmation.exam?.title}"? Students will be able to book it according to the booking schedule.`
+                        : confirmation.action === "cancel"
+                            ? `Are you sure you want to cancel "${confirmation.exam?.title}"?`
+                            : `Mark "${confirmation.exam?.title}" as completed? Examiners will then be able to submit evaluations.`
+                }
+                confirmText={
+                    confirmation.action === "publish"
+                        ? "Publish"
+                        : confirmation.action === "cancel"
+                            ? "Yes, Cancel"
+                            : "Mark Completed"
+                }
+                danger={confirmation.action === "cancel"}
+                onConfirm={performAction}
+                onCancel={() =>
+                    setConfirmation({
+                        open: false,
+                        exam: null,
+                        action: "",
+                    })
+                }
+            />
         </div>
     );
 }
